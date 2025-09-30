@@ -1,6 +1,6 @@
 [package]
-name = "teckhoff/posthogluau"
-description = "A Luau implementation of the PostHog-Node library."
+name = "teckhoff/posthog-rblx"
+description = "A Luau implementation of the PostHog-Node library for use in Roblox."
 version = "0.1.0"
 license = "Apache-2.0"
 authors = ["Trevor Eckhoff <trevor@trevoreckhoff.com>"]

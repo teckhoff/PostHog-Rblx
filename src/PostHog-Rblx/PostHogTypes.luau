@@ -1,6 +1,7 @@
 --!strict
 
 local Promise = require(script.Parent.Utils.Promise)
+local Signal = require(script.Parent.Utils.Signal)
 
 --[=[
     @class PostHogTypes
@@ -520,9 +521,9 @@ export type PostHogFetchOptions = {
 	method: "GET" | "POST" | "PUT" | "PATCH",
 	mode: "no-cors" | nil,
 	credentials: "omit" | nil,
-	headers: { [string]: string }, -- We can't do that here!
+	headers: { [string]: string },
 	body: string?, -- Blob support?
-	-- signal: AbortSignal?
+	signal: Signal.Signal<(string, ...any)>, -- Reason & extra args if needed
 }
 
 export type PostHogFetchResponse = {
