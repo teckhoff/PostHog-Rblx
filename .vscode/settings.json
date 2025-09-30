@@ -1,0 +1,7 @@
+{
+    "editor.defaultFormatter": "JohnnyMorganz.stylua",
+    "editor.formatOnSave": true,
+    "stylua.targetReleaseVersion": "latest",
+    "luau-lsp.sourcemap.autogenerate": true,
+    "luau-lsp.sourcemap.sourcemapFile": "sourcemap.json",
+}
