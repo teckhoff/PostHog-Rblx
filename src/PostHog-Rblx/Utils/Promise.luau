@@ -35,6 +35,7 @@ Promise.__index = Promise
 export type Resolve<T...> = (T...) -> ()
 export type Reject = (...any) -> ()
 export type ResolveReject<T...> = (Resolve<T...>, Reject) -> ()
+export type AllSettledResult<T...> = { { status: "fulfilled", value: T } | { status: "rejected", reason: any } }
 
 export type Promise<T...> = typeof(setmetatable(
 	{} :: {
@@ -609,5 +610,34 @@ _emptyFulfilledPromise:_fulfill(EMPTY_PACKED_TUPLE)
 
 _emptyRejectedPromise = Promise.new()
 _emptyRejectedPromise:_reject(EMPTY_PACKED_TUPLE)
+
+function Promise.allSettled(promises: { Promise<any>? }): Promise<AllSettledResult>
+	if #promises <= 0 then
+		return Promise.resolved()
+	end
+
+	return Promise.spawn(function(resolve)
+		local results: AllSettledResult = {}
+		local resolvedCount = 0
+
+		for _, promise in promises do
+			(promise and promise or Promise.resolved()):Then(function(value: any)
+				table.insert(results, { status = "fulfilled", value = value })
+				resolvedCount += 1
+
+				if resolvedCount == #promises then
+					resolve(results)
+				end
+			end, function(reason: any)
+				table.insert(results, { status = "rejected", reason = reason })
+				resolvedCount += 1
+
+				if resolvedCount == #promises then
+					resolve(results)
+				end
+			end)
+		end
+	end)
+end
 
 return Promise
