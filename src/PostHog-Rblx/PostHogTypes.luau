@@ -20,6 +20,35 @@ local PostHogTypes = table.freeze({
 		GZip = "gzip",
 	}),
 
+	DefaultAssetHosts = table.freeze({
+		US = "https://us-assets.i.posthog.com",
+		EU = "https://eu-assets.i.posthog.com",
+	}),
+
+	DefaultHosts = table.freeze({
+		US = "https://us.i.posthog.com",
+		EU = "https://eu.i.posthog.com",
+	}),
+
+	-- Enum for the Default SecretStore names
+	DefaultSecretNames = table.freeze({
+		ApiKey = "POSTHOG_API_KEY",
+		PersonalApiKey = "POSTHOG_PERSONAL_API_KEY",
+	}),
+
+	-- Events that have been implemented
+	Events = table.freeze({
+		Identify = "$identify",
+		Alias = "$create_alias",
+		Flush = "flush",
+	}),
+
+	PayloadType = table.freeze({
+		Identify = "identify",
+		Capture = "capture",
+		Alias = "alias",
+	}),
+
 	-- PostHogPersistedProperty Enum
 	PostHogPersistedProperty = table.freeze({
 		AnonymousId = "anonymous_id",
@@ -236,6 +265,11 @@ export type Logger = {
 
 export type LogLevel = "log" | "warn" | "error"
 
+export type RetriableOptions = {
+	retryCount: number,
+	retryDelay: number,
+}
+
 -- Survey Types
 export type Survey = {
 	-- NOTE: Keep this in sync with bakcend's SurveyAPISerializer.
@@ -398,18 +432,32 @@ export type SpecificQuestionBranching = {
 	@within PostHogTypes
 ]=]
 export type PostHogCoreOptions = {
+	-- The name of your API key in the SecretStore.
+	-- If it doesn't exist, it will default to 'POSTHOG_API_KEY'.
+	api_key_secret_name: string?,
+
+	-- Whether or not there is a Personal API Key to use.
+	-- Defaults to false.
+	usePersonalApiKey: boolean?,
+
+	-- The name of your personal API key in the SecretStore.
+	-- If it doesn't exist, it will default to 'POSTHOG_PERSONAL_API_KEY'.
+	personal_api_key_secret_name: string?,
+
 	-- PostHog API host, usually 'https://us.i.posthog.com' or 'https://eu.i.posthog.com'
 	host: string?,
 
 	-- The number of events to queue before sending to PostHog (flushing)
 	flushAt: number?,
 
-	-- The interval in milliseconds between periodic flushes
+	-- The interval in seconds between periodic flushes
 	flushInterval: number?,
 
 	-- The maximum number of queued messages to be flushed as part of a single batch.
-	-- Must be hire than flushAt.
+	-- Must be higher than flushAt.
 	maxBatchSize: number?,
+
+	maxQueueSize: number?,
 
 	-- If set to true the SDK is essentially disabled (useful for local environments where you don't want to track anything)
 	disabled: boolean?,
@@ -447,17 +495,34 @@ export type PostHogCoreOptions = {
 
 	requestTimeout: number?,
 
-	featureFlagRequestTimeoutMs: number?,
+	featureFlagRequestTimeoutSeconds: number?,
 
-	remoteConfigRequestTimeoutMs: number?,
+	remoteConfigRequestTimeoutSeconds: number?,
 
-	sessionExpierationTimeSeconds: number?,
+	sessionExpirationTimeSeconds: number?,
 
+	-- Whether you want to disable Gzip compression for outwards requests.
+	-- Defaults to false.
 	disableCompression: boolean?,
 
+	-- Whether or not to disable Geoip. Currently unused. Perhaps useful to see where servers are located?
+	-- Defaults to true.
 	disableGeoip: boolean?,
 
 	historicalMigration: boolean?,
+
+	-- The max size of the cache.
+	-- Defaults to 50000.
+	maxCacheSize: number?,
+
+	-- How often (in seconds) featureFlags are polled.
+	-- Defaults to 30 seconds.
+	featureFlagPollingInterval: number?,
+
+	-- Whether or not Local Evaluation for Feature Flags should be enabled.
+	-- Periodically gets the Feature Flag definitions and stores them instead of polling PostHog every time.
+	-- Defaults to true.
+	enableLocalEvaluation: boolean?,
 }
 
 -- PostHog Core Composition Types
@@ -466,7 +531,7 @@ type PostHogCompressionRecordingBase = {
 	supportedCompression: { Compression }?,
 }
 
-type PostHogEventProperties = { [string]: JsonType }
+export type PostHogEventProperties = { [string]: JsonType }
 
 type PostHogFlagResponseBase = PostHogCompressionRecordingBase & {
 	flags: {
@@ -519,17 +584,18 @@ export type PostHogCaptureOptions = {
 
 export type PostHogFetchOptions = {
 	method: "GET" | "POST" | "PUT" | "PATCH",
-	mode: "no-cors" | nil,
-	credentials: "omit" | nil,
+	mode: "no-cors"?,
+	credentials: "omit"?,
 	headers: { [string]: string },
 	body: string?, -- Blob support?
-	signal: Signal.Signal<(string, ...any)>, -- Reason & extra args if needed
+	signal: Signal.Signal<(string, ...any)>?, -- Reason & extra args if needed
 }
 
 export type PostHogFetchResponse = {
 	status: number,
-	text: () -> Promise.Promise<string>,
-	json: () -> Promise.Promise<any>,
+	--text: () -> Promise.Promise<string>,
+	text: string,
+	json: Promise.Promise<any>,
 }
 
 export type PostHogFeatureFlagDetails = PostHogFeatureFlagResponse -- ???
@@ -569,7 +635,7 @@ export type PostHogGroupProperties = { [string]: string | number }
 
 export type PostHogQueueItem = {
 	message: any,
-	callback: (err: any) -> (),
+	callback: ((err: any) -> ())?,
 }
 
 export type PostHogRemoteConfig = PostHogCompressionRecordingBase & {
@@ -821,7 +887,11 @@ export type IPostHog = {
 -- Functions
 export type BeforeSendFn = (event: EventMessage?) -> EventMessage?
 export type FetchLike = (url: string, options: PostHogFetchOptions) -> PostHogFetchResponse
-export type PromiseFetch = (url: string, options: PostHogFetchOptions) -> Promise.Promise<PostHogFetchResponse>
+export type PromiseFetch = (
+	url: string,
+	options: PostHogFetchOptions,
+	disableCompression: boolean?
+) -> Promise.Promise<PostHogFetchResponse>
 export type SurveyCallback = (surveys: { Survey }) -> ()
 
 return PostHogTypes
