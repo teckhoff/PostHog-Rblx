@@ -1,6 +1,9 @@
 --!strict
 
 local HttpService = game:GetService("HttpService")
+local LocalizationService = game:GetService("LocalizationService")
+local Players = game:GetService("Players")
+local PolicyService = game:GetService("PolicyService")
 
 local PostHogTypes = require(script.Parent.PostHogTypes)
 
@@ -28,7 +31,7 @@ export type PostHog = typeof(setmetatable(
 		_options: PostHogTypes.PostHogOptions?,
 
 		-- PostHog Core Stateless
-		_apiKey: Secret | string,
+		_apiKey: string,
 		_personalApiKey: Secret?,
 		_host: string,
 		_flushAt: number,
@@ -64,72 +67,76 @@ export type PostHog = typeof(setmetatable(
 		--_logger
 
 		_messageQueue: DataStructures.Queue<PostHogTypes.PostHogEventProperties>,
+		_serverId: string,
+		_serverStartedEventSent: boolean,
+		_serverClosedEventSent: boolean,
+
+		_currentPlayers: { string },
 	},
 	{} :: typeof({ __index = PostHog })
 ))
 
-function PostHog.new(options: PostHogTypes.PostHogCoreOptions?): PostHog
+function PostHog.new(options: PostHogTypes.PostHogCoreOptions): PostHog
 	local self = setmetatable({} :: any, PostHog)
 
 	self._options = options
 
-	self._apiKey = (options and options.api_key_secret_name) and HttpService:GetSecret(options.api_key_secret_name)
-		or HttpService:GetSecret(PostHogTypes.DefaultSecretNames.ApiKey)
+	assert(options.api_key, "")
 
-	if options and options.usePersonalApiKey then
+	self._apiKey = options.api_key
+
+	if options.usePersonalApiKey then
 		self._personalApiKey = options.personal_api_key_secret_name
-				and HttpService:GetSecret(options.api_key_secret_name)
+				and HttpService:GetSecret(options.personal_api_key_secret_name)
 			or HttpService:GetSecret(PostHogTypes.DefaultSecretNames.PersonalApiKey)
 	end
 
-	self._host = (options and options.host) and options.host or PostHogTypes.DefaultHosts.US
+	self._host = options.host and options.host or PostHogTypes.DefaultHosts.US
 
-	self._flushAt = (options and options.flushAt) and math.max(options.flushAt, 1) or 20
+	self._flushAt = options.flushAt and math.max(options.flushAt, 1) or 20
 
-	self._flushInterval = (options and options.flushInterval) and options.flushInterval or 10
+	self._flushInterval = options.flushInterval and options.flushInterval or 10
 
-	self._maxBatchSize = math.max(self._flushAt, (options and options.maxBatchSize) and options.maxBatchSize or 100)
+	self._maxBatchSize = math.max(self._flushAt, options.maxBatchSize and options.maxBatchSize or 100)
 
-	self._maxQueueSize = math.max(self._flushAt, (options and options.maxQueueSize) and options.maxQueueSize or 1000)
+	self._maxQueueSize = math.max(self._flushAt, options.maxQueueSize and options.maxQueueSize or 1000)
 
-	self._preloadFeatureFlags = (options and options.preloadFeatureFlags) and options.preloadFeatureFlags or true
+	self._preloadFeatureFlags = options.preloadFeatureFlags and options.preloadFeatureFlags or true
 
-	self._disableSurveys = (options and options.disableSurveys) and options.disableSurveys or false
+	self._disableSurveys = options.disableSurveys and options.disableSurveys or false
 
-	self._requestTimeout = (options and options.requestTimeout) and options.requestTimeout or 10
+	self._requestTimeout = options.requestTimeout and options.requestTimeout or 10
 
-	self._featureFlagsRequestTimeoutMs = (options and options.featureFlagRequestTimeoutSeconds)
+	self._featureFlagsRequestTimeoutMs = options.featureFlagRequestTimeoutSeconds
 			and options.featureFlagRequestTimeoutSeconds
 		or 3
 
-	self._remoteConfigRequestTimeoutMs = (options and options.featureFlagRequestTimeoutSeconds)
+	self._remoteConfigRequestTimeoutMs = options.featureFlagRequestTimeoutSeconds
 			and options.featureFlagRequestTimeoutSeconds
 		or 3
 
 	self._disableGeoip = true
 
-	self._historicalMigration = (options and options.historicalMigration) and options.historicalMigration or false
+	self._historicalMigration = options.historicalMigration and options.historicalMigration or false
 
-	self._disabled = (options and options.disabled) and options.disabled or false
+	self._disabled = options.disabled and options.disabled or false
 
-	self._disableCompression = (options and options.disableCompression) and options.disableCompression or false
+	self._disableCompression = options.disableCompression and options.disableCompression or false
 
-	self._defaultOptIn = (options and options.defaultOptIn) and options.defaultOptIn or false
+	self._defaultOptIn = options.defaultOptIn and options.defaultOptIn or false
 
 	self._promiseQueue = PromiseQueue.new()
 
 	self._events = {}
 
 	self._retryOptions = {
-		retryCount = (options and options.fetchRetryCount) and options.fetchRetryCount or 3,
-		retryDelay = (options and options.fetchRetryDelay) and options.fetchRetryDelay or 3,
+		retryCount = options.fetchRetryCount and options.fetchRetryCount or 3,
+		retryDelay = options.fetchRetryDelay and options.fetchRetryDelay or 3,
 	}
 
-	self._enableLocalEvaluation = (options and options.enableLocalEvaluation) and options.enableLocalEvaluation or true
+	self._enableLocalEvaluation = options.enableLocalEvaluation and options.enableLocalEvaluation or true
 
-	self._featureFlagPollingInterval = (options and options.featureFlagPollingInterval)
-			and options.featureFlagPollingInterval
-		or 30
+	self._featureFlagPollingInterval = options.featureFlagPollingInterval and options.featureFlagPollingInterval or 30
 
 	self._featureFlagsPoller = FeatureFlagPoller.new({
 		pollingInterval = self._featureFlagPollingInterval :: number,
@@ -145,7 +152,7 @@ function PostHog.new(options: PostHogTypes.PostHogCoreOptions?): PostHog
 
 	--_errorTracking
 
-	self._maxCacheSize = (options and options.maxCacheSize) and options.maxCacheSize or 50000
+	self._maxCacheSize = options.maxCacheSize and options.maxCacheSize or 50000
 
 	--_logger
 
@@ -154,10 +161,17 @@ function PostHog.new(options: PostHogTypes.PostHogCoreOptions?): PostHog
 	self._initPromise = Promise:Resolve()
 	self._isInitialized = true
 
+	self._serverId = `S-{UUIDv7()}`
+
+	self._serverStartedEventSent = false
+	self._serverClosedEventSent = false
+
+	self._currentPlayers = {}
+
 	return self
 end
 
-function PostHog.promiseNew(options: PostHogTypes.PostHogCoreOptions?): Promise.Promise<PostHog>
+function PostHog.promiseNew(options: PostHogTypes.PostHogCoreOptions): Promise.Promise<PostHog>
 	return Promise.spawn(function(resolve, reject)
 		local success, instanceOrError = pcall(function()
 			return PostHog.new(options)
@@ -176,7 +190,7 @@ end
 function PostHog._buildPayload(
 	self: PostHog,
 	payload: {
-		distinct_id: string,
+		distinct_id: string?,
 		event: string,
 		properties: PostHogTypes.PostHogEventProperties?,
 	}
@@ -187,8 +201,9 @@ function PostHog._buildPayload(
 		properties = payload.properties or {},
 	}
 
-	newPayload.properties["lib"] = "posthog-rblx"
-	newPayload.properties["lib_version"] = version
+	newPayload.properties[PostHogTypes.Properties.Library] = "posthog-rblx"
+	newPayload.properties[PostHogTypes.Properties.LibraryVersion] = version
+	newPayload.properties[PostHogTypes.Properties.ServerId] = self._serverId
 
 	return newPayload
 end
@@ -280,13 +295,16 @@ function PostHog._flush(self: PostHog): Promise.Promise<nil>
 			body = payload,
 		}
 
-		local fetchPromise = fetch(url, fetchOptions):Then(function(response: HttpPromise.HTTPResponse)
-			for key, value in response do
-				print(`[PostHog Fetch]: {key} = {value}`)
+		local fetchPromise = fetch(url, fetchOptions, self._disableCompression):Then(
+			function(response: HttpPromise.HTTPResponse)
+				for key, value in response do
+					print(`[PostHog Fetch]: {key} = {value}`)
+				end
+			end,
+			function(err)
+				warn(`[PostHog fetch]: Fetch failed, error: {err}`)
 			end
-		end, function(err)
-			warn(`[PostHog fetch]: Fetch failed, error: {err}`)
-		end)
+		)
 
 		table.insert(fetchPromises, fetchPromise)
 
@@ -333,17 +351,17 @@ end
 
 function PostHog._capture(
 	self: PostHog,
-	distinctId: string | number,
+	distinctId: string | number | nil,
 	event: string,
 	properties: PostHogTypes.PostHogEventProperties?,
 	options: PostHogTypes.PostHogCaptureOptions?
 )
-	if typeof(distinctId) == "number" then
+	if distinctId and typeof(distinctId) == "number" then
 		distinctId = tostring(distinctId)
 	end
 
 	local payload = self:_buildPayload({
-		distinct_id = distinctId :: string,
+		distinct_id = distinctId :: string?,
 		event = event,
 		properties = properties,
 	})
@@ -384,8 +402,106 @@ function PostHog.addPendingPromise<T>(self: PostHog, promise: Promise.Promise<T>
 	return self._promiseQueue:Add(promise)
 end
 
-function PostHog.on(self: PostHog, event: string, callback: (...any) -> ())
-	self:getEventSignal(event):Connect(callback)
+function PostHog.onServerStarted(self: PostHog)
+	if self._serverStartedEventSent then
+		return
+	end
+
+	self._serverStartedEventSent = true
+
+	self:_capture(self._serverId, PostHogTypes.ServerEvents.ServerStarted)
+end
+
+function PostHog.onServerClosed(self: PostHog, closeReason: Enum.CloseReason)
+	if self._serverClosedEventSent then
+		return
+	end
+
+	self._serverClosedEventSent = true
+
+	for _, id in self._currentPlayers do
+		self:_capture(id, PostHogTypes.Events.PlayerLeft)
+	end
+
+	self:_capture(self._serverId, PostHogTypes.ServerEvents.ServerClosed, { ["Close Reason"] = closeReason.Name })
+
+	self:_flush()
+end
+
+function PostHog._onPlayerAdded(self: PostHog, player: Player, anonymous: boolean?)
+	local id = anonymous and UUIDv7() or tostring(player.UserId)
+
+	if anonymous then
+		player:SetAttribute(PostHogTypes.Attributes.AnonymousId, id)
+	end
+
+	self:_capture(id, PostHogTypes.Events.PlayerJoined)
+
+	if not table.find(self._currentPlayers, id) then
+		table.insert(self._currentPlayers, id)
+	end
+end
+
+function PostHog.onPlayerAdded(self: PostHog, player: Player): Promise.Promise<()>
+	local PolicyPromise = Promise.new(function(resolve, reject)
+		local policyInfo: { [string]: boolean }? = nil
+		local tryCount = 1
+
+		while not policyInfo and tryCount <= 3 do
+			local success, policyInfoOrError = pcall(function()
+				return PolicyService:GetPolicyInfoForPlayerAsync(player)
+			end)
+
+			if not success then
+				warn({
+					`[PostHog]: Error retrieving policy info for user {player.UserId}. {tryCount < 3 and "Retrying..." or "Keeping anonymous."} (err: {policyInfoOrError})`,
+				})
+				continue
+			end
+
+			policyInfo = policyInfoOrError
+
+			break
+		end
+
+		if policyInfo then
+			resolve(policyInfo)
+			return
+		end
+
+		reject(`Unable to get PolicyInfo for player {player.UserId}. Treating as anonymous.`)
+	end)
+
+	PolicyPromise:Then(function(policyInfo: { [string]: boolean })
+		if policyInfo and policyInfo["AreAdsAllowed"] ~= nil and policyInfo["AreAdsAllowed"] == true then
+			self:_onPlayerAdded(player)
+		else
+			self:_onPlayerAdded(player, true)
+		end
+	end, function(error: string)
+		warn(`[PostHog]: {error}`)
+		self:_onPlayerAdded(player, true)
+	end)
+
+	return PolicyPromise
+end
+
+function PostHog.onPlayerRemoving(self: PostHog, player: Player)
+	if player:GetAttribute(PostHogTypes.Attributes.IsRemoving) then
+		return
+	end
+
+	player:SetAttribute(PostHogTypes.Attributes.IsRemoving, true)
+
+	local id = (player:GetAttribute(PostHogTypes.Attributes.AnonymousId) :: string?) or tostring(player.UserId)
+
+	self:_capture(id, PostHogTypes.Events.PlayerLeft)
+
+	local index = table.find(self._currentPlayers, id)
+
+	if index then
+		table.remove(self._currentPlayers, index)
+	end
 end
 
 function PostHog.getEventSignal(self: PostHog, event: string): Signal.Signal<any>

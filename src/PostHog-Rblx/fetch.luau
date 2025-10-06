@@ -20,7 +20,11 @@ local function fetch(
 			local fetchResponse = HttpResponseToPostHogFetchResponse(response)
 
 			resolve(fetchResponse)
-		end, function(errOrNotOkResponse: string | HttpPromise.HTTPResponse)
+		end, function(errOrNotOkResponse: string | HttpPromise.HTTPResponse | nil)
+			if not errOrNotOkResponse then
+				reject("Unable to complete fetch.")
+			end
+
 			if typeof(errOrNotOkResponse) == "string" then
 				reject(errOrNotOkResponse)
 			end
