@@ -14,6 +14,11 @@ local PostHogTypes = table.freeze({
 		Regex = "regex",
 	}),
 
+	Attributes = table.freeze({
+		AnonymousId = "AnonymousId",
+		IsRemoving = "IsRemoving",
+	}),
+
 	-- Compression Enum
 	Compression = table.freeze({
 		Base64 = "base64",
@@ -32,7 +37,6 @@ local PostHogTypes = table.freeze({
 
 	-- Enum for the Default SecretStore names
 	DefaultSecretNames = table.freeze({
-		ApiKey = "POSTHOG_API_KEY",
 		PersonalApiKey = "POSTHOG_PERSONAL_API_KEY",
 	}),
 
@@ -41,6 +45,13 @@ local PostHogTypes = table.freeze({
 		Identify = "$identify",
 		Alias = "$create_alias",
 		Flush = "flush",
+		PlayerJoined = "Player Joined",
+		PlayerLeft = "Player Left",
+	}),
+
+	ServerEvents = table.freeze({
+		ServerStarted = "Server Started",
+		ServerClosed = "Server Closed",
 	}),
 
 	PayloadType = table.freeze({
@@ -70,6 +81,12 @@ local PostHogTypes = table.freeze({
 		GroupProperties = "group_properties",
 		RemoteConfig = "remote_config",
 	}),
+
+	Properties = {
+		ServerId = "Server ID",
+		Library = "lib",
+		LibraryVersion = "lib_version",
+	},
 
 	-- SurveyMatchType Enum
 	SurveyMatchType = table.freeze({
@@ -434,7 +451,7 @@ export type SpecificQuestionBranching = {
 export type PostHogCoreOptions = {
 	-- The name of your API key in the SecretStore.
 	-- If it doesn't exist, it will default to 'POSTHOG_API_KEY'.
-	api_key_secret_name: string?,
+	api_key: string,
 
 	-- Whether or not there is a Personal API Key to use.
 	-- Defaults to false.
@@ -586,7 +603,7 @@ export type PostHogFetchOptions = {
 	method: "GET" | "POST" | "PUT" | "PATCH",
 	mode: "no-cors"?,
 	credentials: "omit"?,
-	headers: { [string]: string },
+	headers: { [string]: string | Secret },
 	body: string?, -- Blob support?
 	signal: Signal.Signal<(string, ...any)>?, -- Reason & extra args if needed
 }
