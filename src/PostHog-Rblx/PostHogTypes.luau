@@ -42,11 +42,14 @@ local PostHogTypes = table.freeze({
 
 	-- Events that have been implemented
 	Events = table.freeze({
+		PlayerJoined = "Player Joined",
+		PlayerLeft = "Player Left",
+	}),
+
+	InternalEvents = table.freeze({
 		Identify = "$identify",
 		Alias = "$create_alias",
 		Flush = "flush",
-		PlayerJoined = "Player Joined",
-		PlayerLeft = "Player Left",
 	}),
 
 	ServerEvents = table.freeze({

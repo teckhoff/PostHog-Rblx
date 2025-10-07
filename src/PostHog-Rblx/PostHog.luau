@@ -312,7 +312,7 @@ function PostHog._flush(self: PostHog): Promise.Promise<nil>
 	end
 
 	return Promise.allSettled(fetchPromises):Finally(function()
-		self:getEventSignal(PostHogTypes.Events.Flush):Fire(sentMessages)
+		self:getEventSignal(PostHogTypes.InternalEvents.Flush):Fire(sentMessages)
 		self:_startFlushTimerThread()
 	end)
 end
@@ -342,7 +342,7 @@ function PostHog._identify(self: PostHog, distinctId: string | number, propertie
 
 	local payload = self:_buildPayload({
 		distinct_id = distinctId :: string,
-		event = PostHogTypes.Events.Identify,
+		event = PostHogTypes.InternalEvents.Identify,
 		properties = properties,
 	})
 
@@ -391,7 +391,7 @@ function PostHog._alias(
 
 	local payload = self:_buildPayload({
 		distinct_id = distinctId :: string,
-		event = PostHogTypes.Events.Alias,
+		event = PostHogTypes.InternalEvents.Alias,
 		properties = properties,
 	})
 
